@@ -6,8 +6,6 @@
 package net.erabbit.blesensor;
 
 import android.app.AlertDialog;
-import android.app.FragmentManager;
-import android.app.FragmentTransaction;
 import android.app.ProgressDialog;
 import android.bluetooth.BluetoothDevice;
 import android.content.Context;
@@ -15,8 +13,8 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
-import android.support.v7.app.AppCompatActivity;
 import android.os.Bundle;
+import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.Menu;
@@ -28,22 +26,60 @@ import android.widget.ArrayAdapter;
 import android.widget.ListView;
 import android.widget.TextView;
 
-import net.erabbit.bluetooth.BleDevice;
-import net.erabbit.bluetooth.BleDeviceScanFragment;
-import net.erabbit.bluetooth.BleDeviceScanHandler;
+import net.erabbit.ble.BleDevice;
+import net.erabbit.ble.BleDevicesManager;
+import net.erabbit.ble.BleSearchReceiver;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.TreeMap;
 
 public class MainActivity extends AppCompatActivity
-        implements BleDeviceScanHandler.BleDeviceScanListener, AdapterView.OnItemClickListener {
+        implements AdapterView.OnItemClickListener {
 
-    protected class DeviceAdapter extends ArrayAdapter<BluetoothDevice> {
+    BleSearchReceiver searchReceiver = new BleSearchReceiver() {
+        @Override
+        public void onSearchStarted() {
+            devices.clear();
+            deviceAdapter.notifyDataSetChanged();
+            progressDlg = ProgressDialog.show(MainActivity.this,
+                    getString(R.string.scanning_title), //title
+                    getString(R.string.scanning_msg), //msg
+                    true, //indeterminate
+                    true, //cancelable
+                    new DialogInterface.OnCancelListener() {
+                        public void onCancel(DialogInterface arg0) {
+                            bleDevicesManager.stopSearch();
+                            progressDlg.dismiss();
+                        }
+                    });
+        }
+
+        @Override
+        public void onFoundDevice(String deviceID, int rssi, Map<Integer, byte[]> data, String deviceType) {
+            BleDevice bleDevice = bleDevicesManager.findDevice(deviceID);
+            if(bleDevice == null)
+                bleDevice = bleDevicesManager.createDevice(deviceID, MainActivity.this, DialogIoTSensor.class, null);
+            devices.add(bleDevice);
+            deviceRSSIs.put(deviceID, rssi);
+            deviceAdapter.notifyDataSetChanged();
+        }
+
+        @Override
+        public void onRSSIUpdated(String deviceID, int rssi) {
+            deviceRSSIs.put(deviceID, rssi);
+        }
+
+        @Override
+        public void onSearchTimeOut() {
+            progressDlg.dismiss();
+        }
+    };
+
+    protected class DeviceAdapter extends ArrayAdapter<BleDevice> {
         int layout_res;
 
-        DeviceAdapter(Context context, int resource, ArrayList<BluetoothDevice> devicesList) {
+        DeviceAdapter(Context context, int resource, ArrayList<BleDevice> devicesList) {
             super(context, resource, devicesList);
             layout_res = resource;
         }
@@ -57,31 +93,30 @@ public class MainActivity extends AppCompatActivity
             TextView nameLabel = (TextView)cell.findViewById(R.id.nameText);
             TextView addressLabel = (TextView)cell.findViewById(R.id.addrText);
             TextView signalLabel = (TextView)cell.findViewById(R.id.rssiText);
-            BluetoothDevice device = getItem(position);
-            nameLabel.setText(device.getName());
-            addressLabel.setText(device.getAddress());
-            if(deviceRSSIs.containsKey(device.getAddress()))
-                signalLabel.setText(getString(R.string.rssi_format, deviceRSSIs.get(device.getAddress())));
+            BleDevice device = getItem(position);
+            nameLabel.setText(device.getDeviceName());
+            addressLabel.setText(device.getDeviceKey());
+            if(deviceRSSIs.containsKey(device.getDeviceKey()))
+                signalLabel.setText(getString(R.string.rssi_format, deviceRSSIs.get(device.getDeviceKey())));
             return cell;
         }
     }
 
     @Override
     public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
-        Intent intent = new Intent(this, IoTSensorActivity.class);
-        intent.putExtra("BluetoothDevice", devices.get(position));
-        startActivity(intent);
+        bleDevicesManager.setCurDevice(devices.get(position));
+        startActivity(new Intent(this, IoTSensorActivity.class));
     }
 
-    protected ArrayList<BluetoothDevice> devices = new ArrayList<>();
+    protected ArrayList<BleDevice> devices = new ArrayList<>();
     protected DeviceAdapter deviceAdapter;
     protected ListView deviceList;
 
     protected Map<String,Integer> deviceRSSIs = new TreeMap<>();
 
-    protected DeviceScanFragment deviceScanFragment;
-
     protected ProgressDialog progressDlg;
+
+    BleDevicesManager bleDevicesManager = BleDevicesManager.getInstance(this);
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -91,44 +126,6 @@ public class MainActivity extends AppCompatActivity
         deviceAdapter = new DeviceAdapter(this, R.layout.device_list_row, devices);
         deviceList.setAdapter(deviceAdapter);
         deviceList.setOnItemClickListener(this);
-        FragmentManager fm = getFragmentManager();
-        deviceScanFragment = new DeviceScanFragment();
-        FragmentTransaction ft = fm.beginTransaction();
-        ft.add(deviceScanFragment, "DeviceScan");
-        ft.commit();
-    }
-
-    @Override
-    public void onStartScan() {
-        devices.clear();
-        deviceAdapter.notifyDataSetChanged();
-        progressDlg = ProgressDialog.show(MainActivity.this,
-                getString(R.string.scanning_title), //title
-                getString(R.string.scanning_msg), //msg
-                true, //indeterminate
-                true, //cancelable
-                new DialogInterface.OnCancelListener() {
-                    public void onCancel(DialogInterface arg0) {
-                        deviceScanFragment.stopScan();
-                        progressDlg.dismiss();
-                    }
-                });
-    }
-
-    @Override
-    public void onFoundDevice(Object device, int rssi) {
-        devices.add((BluetoothDevice) device);
-        deviceRSSIs.put(((BluetoothDevice)device).getAddress(), rssi);
-        deviceAdapter.notifyDataSetChanged();
-    }
-
-    @Override
-    public void onScanTimeout() {
-        progressDlg.dismiss();
-    }
-
-    @Override
-    public void onScanRSSIUpdated(Object device, int rssi) {
     }
 
     @Override
@@ -161,7 +158,7 @@ public class MainActivity extends AppCompatActivity
                 }
                 break;
             case R.id.action_scan:
-                deviceScanFragment.tryScan();
+                bleDevicesManager.startSearch(this);
                 break;
             default:
                 return super.onOptionsItemSelected(item);

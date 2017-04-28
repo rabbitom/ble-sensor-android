@@ -1,15 +1,20 @@
 package net.erabbit.blesensor;
 
 import android.bluetooth.BluetoothDevice;
+import android.content.Context;
+import android.content.DialogInterface;
 import android.util.Log;
 
-import net.erabbit.bluetooth.BleDevice;
+import net.erabbit.ble.BleDevice;
 import net.erabbit.common_lib.CoolUtility;
 
+import org.json.JSONObject;
+
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Locale;
-import java.util.UUID;
 
 /**
  * Created by Tom on 16/7/20.
@@ -17,15 +22,14 @@ import java.util.UUID;
 public class DialogIoTSensor extends BleDevice {
 
     public enum SensorFeature {
-        ACCELEROMETER(  0, "2ea78970-7d44-44bb-b097-26183f402401", 3, "g", 2),
-        GYROSCOPE(      1, "2ea78970-7d44-44bb-b097-26183f402402", 3, "deg/s", 2),
-        MAGNETOMETER(   2, "2ea78970-7d44-44bb-b097-26183f402403", 3, "uT", 0),
-        BAROMETER(      3, "2ea78970-7d44-44bb-b097-26183f402404", 1, "Pa", 0),//Pressure
-        HUMIDITY(       5, "2ea78970-7d44-44bb-b097-26183f402405", 1, "%", 0),
-        TEMPERATURE(    4, "2ea78970-7d44-44bb-b097-26183f402406", 1, "°C", 2),
-        SFL(            6, "2ea78970-7d44-44bb-b097-26183f402407", 4, "", 2);
+        ACCELEROMETER(  0, 3, "g", 2),
+        GYROSCOPE(      1, 3, "deg/s", 2),
+        MAGNETOMETER(   2, 3, "uT", 0),
+        BAROMETER(      3, 1, "Pa", 0),//Pressure
+        HUMIDITY(       5, 1, "%", 0),
+        TEMPERATURE(    4, 1, "°C", 2),
+        SFL(            6, 4, "", 2);
 
-        private UUID uuid;
         private int keyOffset;
         private int dimension;
         private String unit;
@@ -33,10 +37,6 @@ public class DialogIoTSensor extends BleDevice {
 
         private float rangeMin = 0;
         private float rangeMax = 0;
-
-        public UUID getUuid() {
-            return uuid;
-        }
 
         public int getKeyOffset() {
             return keyOffset;
@@ -50,8 +50,7 @@ public class DialogIoTSensor extends BleDevice {
             return new float[]{rangeMin, rangeMax};
         }
 
-        SensorFeature(int keyOffset, String uuidString, int dimension, String unit, int precision) {
-            this.uuid = UUID.fromString(uuidString);
+        SensorFeature(int keyOffset, int dimension, String unit, int precision) {
             this.keyOffset = keyOffset;
             this.dimension = dimension;
             this.unit = unit;
@@ -236,14 +235,28 @@ public class DialogIoTSensor extends BleDevice {
         String getValueString();
     }
 
-    protected static final UUID UUID_INFO = UUID.fromString("2ea78970-7d44-44bb-b097-26183f402408"); // Read Device Features
+    static JSONObject readJSON(Context context, String filename) {
+        JSONObject testjson = null;
+        try {
+            InputStreamReader isr = new InputStreamReader(context.getAssets().open(filename), "UTF-8");
+            BufferedReader br = new BufferedReader(isr);
+            String line;
+            StringBuilder builder = new StringBuilder();
+            while ((line = br.readLine()) != null) {
+                builder.append(line);
+            }
+            br.close();
+            isr.close();
+            testjson = new JSONObject(builder.toString());//builder读取了JSON中的数据。
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return testjson;
+    }
 
-    public DialogIoTSensor(BluetoothDevice device) {
-        super(device);
+    public DialogIoTSensor(Context context, BluetoothDevice device, JSONObject jo) {
+        super(context, device, readJSON(context, "DialogIoTSensorKit.json"));
         //服务和特性UUID
-        UUID_MAIN_SERVICE = UUID.fromString("2ea78970-7d44-44bb-b097-26183f402400");
-        UUID_MAIN_CONFIG = UUID.fromString("2ea78970-7d44-44bb-b097-26183f402409");//CONTROL_POINT
-        UUID_MAIN_DATA = UUID.fromString("2ea78970-7d44-44bb-b097-26183f40240A");//CONTROL_REPLY
         //From BME280 datasheet
         SensorFeature.HUMIDITY.rangeMin = 0;
         SensorFeature.HUMIDITY.rangeMax = 100;
@@ -254,13 +267,10 @@ public class DialogIoTSensor extends BleDevice {
     }
 
     @Override
-    public void onConnect() {
-        startReceiveData();
-        readInfo();
-    }
-
-    private void readInfo() {
-        ReadCharacteristic(btGatt, btService, UUID_INFO);
+    public void onDeviceReady(String deviceID) {
+        startReceiveData("info");
+        readData("info");
+        //super.onDeviceReady(deviceID);
     }
 
     private enum ControlCommand {
@@ -281,23 +291,65 @@ public class DialogIoTSensor extends BleDevice {
     }
 
     @Override
-    protected void onReceiveData(byte[] data) {
+    public void onDeviceReceivedData(String deviceID, String name, byte[] data) {
+        switch(name) {
+            case "info":
+                onInfo(data);
+                break;
+            case "control_receive":
+                onControlReceive(data);
+                break;
+            default:
+                onSensorData(name, data);
+                break;
+        }
+    }
+
+    private void onInfo(byte[] data) {
+        for (SensorFeature feature:
+                SensorFeature.values()) {
+            if(data[feature.getKeyOffset()] == 1) {
+                addFeature(feature);
+                if(feature == SensorFeature.SFL) {
+                    addFeature(SensorFeature.ACCELEROMETER);
+                    addFeature(SensorFeature.GYROSCOPE);
+                    addFeature(SensorFeature.MAGNETOMETER);
+                }
+            }
+        }
+        if(data.length > 7)
+            firmwareVersion = new String(data, 7, data.length-7);
+        super.onDeviceReady(getDeviceKey());
+    }
+
+    private void onControlReceive(byte[] data) {
         byte commandId = data[1];
         ControlCommand command = ControlCommand.findById(commandId);
-        if(command != null)
-            switch(command) {
+        if (command != null)
+            switch (command) {
                 case ReadSettings:
                     settings.parse(data, 2);
                     break;
                 case SensorOn:
                     sensorOn = true;
-                    onValueChange(VALUE_OF_SENSOR_SWITCH, 1);
+                    onDeviceValueChanged(getDeviceKey(), VALUE_OF_SENSOR_SWITCH, 1);
                     break;
                 case SensorOff:
                     sensorOn = false;
-                    onValueChange(VALUE_OF_SENSOR_SWITCH, 0);
+                    onDeviceValueChanged(getDeviceKey(), VALUE_OF_SENSOR_SWITCH, 0);
                     break;
             }
+    }
+
+    private void onSensorData(String sensorName, byte[] data) {
+        //SensorFeature feature = SensorFeature.findByUUID(uuid);
+        for(SensorFeature feature : features) {
+            if(sensorName.equals(feature.name())) {
+                if(feature.parseValue(data, settings))
+                    onDeviceValueChanged(getDeviceKey(), VALUE_OF_SENSOR_FEATURE, features.indexOf(feature));
+                break;
+            }
+        }
     }
 
     private enum AccelerometerRange {
@@ -474,17 +526,21 @@ public class DialogIoTSensor extends BleDevice {
         }
     }
 
+    private void sendCommand(byte[] command) {
+        sendData("control_send", command);
+    }
+
     private Settings settings = new Settings();
 
     public void readSettings() {
-        sendData(new byte[]{ControlCommand.ReadSettings.getId(), 0});
+        sendCommand(new byte[]{ControlCommand.ReadSettings.getId(), 0});
     }
 
     private void writeSettings() {
         byte[] command = new byte[12];
         command[0] = ControlCommand.WriteSettings.getId();
         settings.write(command, 1);
-        sendData(command);
+        sendCommand(command);
     }
 
     public void setSensorValueRate(SensorFeature feature, SensorValueRate rate) {
@@ -512,37 +568,6 @@ public class DialogIoTSensor extends BleDevice {
     private void addFeature(SensorFeature feature) {
         if(!features.contains(feature))
             features.add(feature);
-    }
-
-    @Override
-    protected void onReceiveData(UUID uuid, byte[] data) {
-        super.onReceiveData(uuid, data);
-        if(uuid.equals(UUID_INFO)) {
-            for (SensorFeature feature:
-                    SensorFeature.values()) {
-                if(data[feature.getKeyOffset()] == 1) {
-                    addFeature(feature);
-                    if(feature == SensorFeature.SFL) {
-                        addFeature(SensorFeature.ACCELEROMETER);
-                        addFeature(SensorFeature.GYROSCOPE);
-                        addFeature(SensorFeature.MAGNETOMETER);
-                    }
-                }
-            }
-            if(data.length > 7)
-                firmwareVersion = new String(data, 7, data.length-7);
-            super.onConnect();
-        }
-        else {
-            //SensorFeature feature = SensorFeature.findByUUID(uuid);
-            for(SensorFeature feature : features) {
-                if(uuid.equals(feature.getUuid())) {
-                    if(feature.parseValue(data, settings))
-                        onValueChange(VALUE_OF_SENSOR_FEATURE, features.indexOf(feature));
-                    break;
-                }
-            }
-        }
     }
 
     public static final int VALUE_OF_SENSOR_SWITCH = 1;
@@ -580,15 +605,15 @@ public class DialogIoTSensor extends BleDevice {
         if(onOff) {
             if(!sensorOn)
                 switchSensor(true);
-            EnableNotification(btGatt, btService, sensorFeature.getUuid());
+            startReceiveData(sensorFeature.name());
         }
         else
-            DisableNotification(btGatt, btService, sensorFeature.getUuid());
+            stopReceiveData(sensorFeature.name());
         sensorFeature.enabled = onOff;
     }
 
     public void switchSensor(boolean onOff) {
-        sendData(new byte[]{onOff ? ControlCommand.SensorOn.getId() : ControlCommand.SensorOff.getId()});
+        sendCommand(new byte[]{onOff ? ControlCommand.SensorOn.getId() : ControlCommand.SensorOff.getId()});
     }
 
     public double getMagnetoAngle() throws Exception {

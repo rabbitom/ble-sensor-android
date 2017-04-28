@@ -1,11 +1,11 @@
 package net.erabbit.blesensor;
 
-import net.erabbit.bluetooth.BleApplication;
+import android.app.Application;
 
 /**
  * Created by Tom on 16/7/25.
  */
-public class BLESensorApp extends BleApplication {
+public class BLESensorApp extends Application {
 
     protected static BLESensorApp instance;
 
