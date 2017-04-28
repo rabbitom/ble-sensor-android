@@ -268,6 +268,7 @@ public class DialogIoTSensor extends BleDevice {
 
     @Override
     public void onDeviceReady(String deviceID) {
+        startReceiveData("control_receive");
         startReceiveData("info");
         readData("info");
         //super.onDeviceReady(deviceID);
