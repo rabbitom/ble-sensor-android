@@ -5,15 +5,16 @@
 
 package net.erabbit.blesensor;
 
+import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.ProgressDialog;
-import android.bluetooth.BluetoothDevice;
 import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
+import android.support.v4.content.LocalBroadcastManager;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.view.LayoutInflater;
@@ -116,16 +117,20 @@ public class MainActivity extends AppCompatActivity
 
     protected ProgressDialog progressDlg;
 
-    BleDevicesManager bleDevicesManager = BleDevicesManager.getInstance(this);
+    BleDevicesManager bleDevicesManager ;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        bleDevicesManager = BleDevicesManager.getInstance(this);
         deviceList = (ListView)findViewById(R.id.deviceList);
         deviceAdapter = new DeviceAdapter(this, R.layout.device_list_row, devices);
         deviceList.setAdapter(deviceAdapter);
         deviceList.setOnItemClickListener(this);
+
+        LocalBroadcastManager lbm = LocalBroadcastManager.getInstance(this);
+        searchReceiver.registerReceiver(lbm);
     }
 
     @Override

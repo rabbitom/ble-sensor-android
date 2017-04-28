@@ -21,9 +21,10 @@ android {
 
 dependencies {
     compile fileTree(include: ['*.jar'], dir: 'libs')
-    testCompile 'junit:junit:4.12'
-    compile 'com.android.support:appcompat-v7:25.3.1'
+    //compile 'com.android.support:appcompat-v7:25.3.0'
     compile files('libs/jpct_ae.jar')
     compile files('libs/bones.jar')
     compile project(path: ':ble')
+    compile 'com.android.support:design:25.3.1'
+    testCompile 'junit:junit:4.12'
 }

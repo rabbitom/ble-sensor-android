@@ -3,10 +3,12 @@ package net.erabbit.blesensor;
 import android.app.FragmentManager;
 import android.app.ProgressDialog;
 import android.bluetooth.BluetoothDevice;
+import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.os.Bundle;
 import android.app.AlertDialog;
+import android.support.v4.content.LocalBroadcastManager;
 import android.support.v7.app.ActionBar;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
@@ -20,9 +22,16 @@ import android.widget.Switch;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import net.erabbit.bluetooth.BleDeviceMsgHandler;
+import net.erabbit.ble.BleDevice;
+import net.erabbit.ble.BleDevicesManager;
+import net.erabbit.ble.DeviceStateReceiver;
+import net.erabbit.ble.entity.Characteristic;
+import net.erabbit.ble.entity.DeviceObject;
+import net.erabbit.ble.entity.Service;
+import net.erabbit.ble.utils.LogUtil;
 import net.erabbit.common_lib.WaveformView;
 
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -33,7 +42,7 @@ import raft.jpct.bones.Quaternion;
  * Created by Tom on 16/7/21.
  */
 public class IoTSensorActivity extends AppCompatActivity
-        implements BleDeviceMsgHandler.BleDeviceMsgListener, View.OnClickListener, DialogInterface.OnClickListener {
+        implements View.OnClickListener, DialogInterface.OnClickListener {
 
     protected class FeatureViewHolder {
         TextView featureName;
@@ -83,14 +92,14 @@ public class IoTSensorActivity extends AppCompatActivity
         public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
             curFeatureIndex = position;
             DialogIoTSensor.SensorFeature feature = (DialogIoTSensor.SensorFeature) getItem(position);
-            if(feature == DialogIoTSensor.SensorFeature.SFL) {
+            if (feature == DialogIoTSensor.SensorFeature.SFL) {
                 device3DFragment.show();
                 return;
             }
             featureFragment.show(feature);
-            if(waveformView == null)
+            if (waveformView == null)
                 waveformView = featureFragment.getWaveformView();
-            if(feature == DialogIoTSensor.SensorFeature.MAGNETOMETER)
+            if (feature == DialogIoTSensor.SensorFeature.MAGNETOMETER)
                 waveformView.setGrids(0, 0);
             else
                 waveformView.clearGrids();
@@ -107,22 +116,21 @@ public class IoTSensorActivity extends AppCompatActivity
                 featureSwitch.setOnClickListener(IoTSensorActivity.this);
                 holder = new FeatureViewHolder(cell);
                 cell.setTag(holder);
-            }
-            else
-                holder = (FeatureViewHolder)cell.getTag();
+            } else
+                holder = (FeatureViewHolder) cell.getTag();
             DialogIoTSensor.SensorFeature feature = (DialogIoTSensor.SensorFeature) getItem(position);
             holder.reset(feature);
             return cell;
         }
     }
 
-    protected BluetoothDevice btDevice;
+    private Context context = this;
 
     protected DialogIoTSensor sensor;
     protected ListView featureList;
     protected FeatureAdapter featureAdapter;
 
-    protected int curFeatureIndex= -1;
+    protected int curFeatureIndex = -1;
 
     protected Switch allSensorSwitch;
     protected FeatureFragment featureFragment;
@@ -131,65 +139,150 @@ public class IoTSensorActivity extends AppCompatActivity
 
     protected AlertDialog progressDlg;
 
-    protected BleDeviceMsgHandler deviceHandler;
+    BleDevicesManager bleDevicesManager;
+
+    DeviceStateReceiver deviceStateReceiver = new DeviceStateReceiver() {
+
+        @Override
+        public void onDeviceConnected(String deviceID) {
+            super.onDeviceConnected(deviceID);
+        }
+
+        @Override
+        public void onDeviceDisconnected(String deviceID) {
+            super.onDeviceDisconnected(deviceID);
+            progressDlg.dismiss();
+            Toast.makeText(context, R.string.disconnected_msg, Toast.LENGTH_SHORT).show();
+            finish();
+        }
+
+        @Override
+        public void onDeviceError(String deviceID, int errId, String error) {
+            super.onDeviceError(deviceID, errId, error);
+        }
+
+        @Override
+        public void onDeviceMismatch(String deviceID) {
+            super.onDeviceMismatch(deviceID);
+
+        }
+
+        @Override
+        public void onDeviceReady(String deviceID) {
+            super.onDeviceReady(deviceID);
+            progressDlg.dismiss();
+            TextView versionText = (TextView) findViewById(R.id.versionText);
+            if (versionText != null)
+                versionText.setText(getString(R.string.firmware_version, ((DialogIoTSensor) sensor).getFirmwareVersion()));
+            featureAdapter.notifyDataSetChanged();
+            sensor.readSettings();
+
+        }
+
+        @Override
+        public void onDeviceReceivedData(String deviceID, String name, byte[] data) {
+            super.onDeviceReceivedData(deviceID, name, data);
+        }
+
+        @Override
+        public void onDeviceRSSIUpdated(String deviceID, int rssi) {
+            super.onDeviceRSSIUpdated(deviceID, rssi);
+
+        }
+
+        @Override
+        public void onDeviceValueChanged(String deviceID, int key, Serializable value) {
+            super.onDeviceValueChanged(deviceID, key, value);
+            int valueParam = (int) value;
+            switch (key) {
+                case DialogIoTSensor.VALUE_OF_SENSOR_SWITCH: {
+                    allSensorSwitch.setChecked(valueParam > 0);
+                    if (curFeatureIndex >= 0) {
+                        DialogIoTSensor.SensorFeature feature = sensor.getFeature(curFeatureIndex);
+                        featureFragment.getFeatureSwitch().setChecked(feature.isEnabled() && sensor.isSensorOn());
+                    }
+                }
+                break;
+                case DialogIoTSensor.VALUE_OF_SENSOR_FEATURE: {
+                    int position = valueParam;
+                    DialogIoTSensor.SensorFeature sensorFeature = sensor.getFeature(position);
+                    FeatureViewHolder vh = getFeatureViewHolder(position);
+                    if (vh != null)
+                        vh.updateValue(sensorFeature);
+                    if (curFeatureIndex == position) {
+                        if (sensorFeature == DialogIoTSensor.SensorFeature.SFL) {
+                            float[] sensorValues = sensorFeature.getValues();
+                            Quaternion quaternion = new Quaternion(sensorValues[1], sensorValues[2], sensorValues[3], sensorValues[0]);
+                            device3DFragment.setMatrix(quaternion.getRotationMatrix());
+                        } else {
+                            waveformView.addValues(sensorFeature.getValues(), 1);
+                            featureFragment.curValue.setText(getSensorFeatureValueString(sensorFeature));
+                            featureFragment.maxValue.setText(getString(R.string.max, sensorFeature.getValueString(waveformView.getMaxValue())));
+                            featureFragment.minValue.setText(getString(R.string.min, sensorFeature.getValueString(waveformView.getMinValue())));
+                        }
+                    }
+                }
+                break;
+            }
+
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        bleDevicesManager = BleDevicesManager.getInstance(this);
+        sensor = (DialogIoTSensor) bleDevicesManager.getCurDevice();
+        if (sensor == null)
+            finish();
+
+        LocalBroadcastManager lbm = LocalBroadcastManager.getInstance(this);
+        deviceStateReceiver.registerReceiver(lbm);
+
         ActionBar actionBar = getSupportActionBar();
-        if(actionBar != null) {
+        if (actionBar != null) {
             actionBar.setDisplayShowHomeEnabled(true);
             actionBar.setDisplayHomeAsUpEnabled(true);
         }
-        btDevice = getIntent().getParcelableExtra("BluetoothDevice");
-        if(btDevice == null)
-            finish();
-        sensor = (DialogIoTSensor)BLESensorApp.getInstance().findDevice(btDevice.getAddress());
-        if(sensor == null) {
-            sensor = new DialogIoTSensor(btDevice);
-            BLESensorApp.getInstance().getDevices().add(sensor);
-        }
         setContentView(R.layout.activity_iot_sensor);
-        featureList = (ListView)findViewById(R.id.featureList);
+        featureList = (ListView) findViewById(R.id.featureList);
         featureAdapter = new FeatureAdapter();
         featureList.setAdapter(featureAdapter);
         featureList.setOnItemClickListener(featureAdapter);
-        allSensorSwitch = (Switch)findViewById(R.id.allSensorSwitch);
-        if(allSensorSwitch != null)
+        allSensorSwitch = (Switch) findViewById(R.id.allSensorSwitch);
+        if (allSensorSwitch != null)
             allSensorSwitch.setOnClickListener(this);
-        setTitle(sensor.getBtName("IoT Sensor"));
-        deviceHandler = new BleDeviceMsgHandler(this);
-        if(!sensor.isConnected()) {
+        setTitle(sensor.getDeviceName());
+        if (!sensor.getConnected()) {
             progressDlg = ProgressDialog.show(this, getString(R.string.connecting_title), getString(R.string.connecting_msg), true, true, new DialogInterface.OnCancelListener() {
                 @Override
                 public void onCancel(DialogInterface dialog) {
                     finish();
                 }
             });
-            sensor.connect(this, deviceHandler);
+            sensor.connect();
         }
         FragmentManager fragmentManager = getFragmentManager();
-        featureFragment = (FeatureFragment)fragmentManager.findFragmentById(R.id.featureDetail);
+        featureFragment = (FeatureFragment) fragmentManager.findFragmentById(R.id.featureDetail);
         featureFragment.hide();
-        device3DFragment = (Device3DFragment)fragmentManager.findFragmentById(R.id.device3d);
+        device3DFragment = (Device3DFragment) fragmentManager.findFragmentById(R.id.device3d);
         device3DFragment.hide();
     }
 
     @Override
     public void finish() {
-        if(sensor != null) {
-            if(sensor.isConnected()) {
-                if(device3DFragment.isVisible()) {
+        if (sensor != null) {
+            if (sensor.getConnected()) {
+                if (device3DFragment.isVisible()) {
                     device3DFragment.hide();
                     curFeatureIndex = -1;
                     return;
-                }
-                else if(featureFragment.isVisible()) {
+                } else if (featureFragment.isVisible()) {
                     featureFragment.hide();
                     curFeatureIndex = -1;
                     return;
-                }
-                else
+                } else
                     sensor.disconnect();
             }
         }
@@ -198,74 +291,13 @@ public class IoTSensorActivity extends AppCompatActivity
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
-        if(item.getItemId() == android.R.id.home) {
+        if (item.getItemId() == android.R.id.home) {
             finish();
             return true;
         }
         return super.onOptionsItemSelected(item);
     }
 
-    @Override
-    public void onDeviceReady(String btAddress) {
-        progressDlg.dismiss();
-        TextView versionText = (TextView)findViewById(R.id.versionText);
-        if(versionText != null)
-            versionText.setText(getString(R.string.firmware_version, sensor.getFirmwareVersion()));
-        featureAdapter.notifyDataSetChanged();
-        sensor.readSettings();
-    }
-
-    @Override
-    public void onConnectFailed(String btAddress) {
-
-    }
-
-    @Override
-    public void onConnectEnded(String btAddress) {
-        progressDlg.dismiss();
-        Toast.makeText(this, R.string.disconnected_msg, Toast.LENGTH_SHORT).show();
-        finish();
-    }
-
-    @Override
-    public void onReceivedData(byte[] data) {
-
-    }
-
-    @Override
-    public void onValueChanged(String btAddress, int valueId, int valueParam) {
-        switch(valueId) {
-            case DialogIoTSensor.VALUE_OF_SENSOR_SWITCH: {
-                allSensorSwitch.setChecked(valueParam > 0);
-                if(curFeatureIndex >= 0) {
-                    DialogIoTSensor.SensorFeature feature = sensor.getFeature(curFeatureIndex);
-                    featureFragment.getFeatureSwitch().setChecked(feature.isEnabled() && sensor.isSensorOn());
-                }
-            }
-                break;
-            case DialogIoTSensor.VALUE_OF_SENSOR_FEATURE: {
-                int position = valueParam;
-                DialogIoTSensor.SensorFeature sensorFeature = sensor.getFeature(position);
-                FeatureViewHolder vh = getFeatureViewHolder(position);
-                if(vh != null)
-                    vh.updateValue(sensorFeature);
-                if(curFeatureIndex == position) {
-                    if(sensorFeature == DialogIoTSensor.SensorFeature.SFL) {
-                        float[] sensorValues = sensorFeature.getValues();
-                        Quaternion quaternion = new Quaternion(sensorValues[1], sensorValues[2], sensorValues[3], sensorValues[0]);
-                        device3DFragment.setMatrix(quaternion.getRotationMatrix());
-                    }
-                    else {
-                        waveformView.addValues(sensorFeature.getValues(), 1);
-                        featureFragment.curValue.setText(getSensorFeatureValueString(sensorFeature));
-                        featureFragment.maxValue.setText(getString(R.string.max, sensorFeature.getValueString(waveformView.getMaxValue())));
-                        featureFragment.minValue.setText(getString(R.string.min, sensorFeature.getValueString(waveformView.getMinValue())));
-                    }
-                }
-            }
-                break;
-        }
-    }
 
     protected FeatureViewHolder getFeatureViewHolder(int position) {
         int firstVisiblePosition = featureList.getFirstVisiblePosition();
@@ -280,24 +312,23 @@ public class IoTSensorActivity extends AppCompatActivity
 
     @Override
     public void onClick(View v) {
-        if(v == allSensorSwitch) {
+        if (v == allSensorSwitch) {
             sensor.switchSensor(allSensorSwitch.isChecked());
-        }
-        else if(v.getId() == R.id.featureSwitch) {
-            DialogIoTSensor.SensorFeature sensorFeature = (DialogIoTSensor.SensorFeature)v.getTag();
-            sensor.switchSensorFeature(sensorFeature, ((Switch)v).isChecked());
+        } else if (v.getId() == R.id.featureSwitch) {
+            DialogIoTSensor.SensorFeature sensorFeature = (DialogIoTSensor.SensorFeature) v.getTag();
+            sensor.switchSensorFeature(sensorFeature, ((Switch) v).isChecked());
             FeatureViewHolder vh = getFeatureViewHolder(sensor.features.indexOf(sensorFeature));
-            if(vh != null)
+            if (vh != null)
                 vh.updateStatus(sensorFeature);
         }
     }
 
     public CharSequence[] getFeatureSettings(DialogIoTSensor.SensorFeature feature) {
-        if(feature == DialogIoTSensor.SensorFeature.MAGNETOMETER)
+        if (feature == DialogIoTSensor.SensorFeature.MAGNETOMETER)
             return new CharSequence[]{getString(R.string.calibration)};
         else {
             String rateString = getString(R.string.rate);
-            if(feature.rate != null)
+            if (feature.rate != null)
                 rateString += (" (" + feature.rate.getValueString() + ")");
             return new CharSequence[]{rateString};
         }
@@ -309,9 +340,9 @@ public class IoTSensorActivity extends AppCompatActivity
     ProgressDialog calibrationDialog;
 
     public void onFeatureSettings(final DialogIoTSensor.SensorFeature feature, int index) {
-        if(index == 0) {
-            if(feature == DialogIoTSensor.SensorFeature.MAGNETOMETER) {
-                if(sensor.isSensorOn() && feature.isEnabled()) {
+        if (index == 0) {
+            if (feature == DialogIoTSensor.SensorFeature.MAGNETOMETER) {
+                if (sensor.isSensorOn() && feature.isEnabled()) {
                     if (calibrationDialog == null)
                         calibrationDialog = new ProgressDialog(this);
                     calibrationDialog.setCancelable(false);
@@ -337,19 +368,17 @@ public class IoTSensorActivity extends AppCompatActivity
                     calibrationDialog.show();
                     feature.startCalibration();
                     Log.d("on feature settings", "start calibration");
-                }
-                else
+                } else
                     new AlertDialog.Builder(this).setTitle(R.string.calibration).setMessage(R.string.calibration_condition).show();
-            }
-            else {
+            } else {
                 Log.d("on feature settings", "rate");
                 ArrayList<DialogIoTSensor.SensorValueRate> rates = feature.getRates();
-                if(rates == null)
+                if (rates == null)
                     return;
                 int curRateIndex = (feature.rate != null) ? rates.indexOf(feature.rate) : -1;
                 String[] rateStrings = new String[rates.size()];
                 int rateIndex = 0;
-                for(DialogIoTSensor.SensorValueRate rate : rates)
+                for (DialogIoTSensor.SensorValueRate rate : rates)
                     rateStrings[rateIndex++] = rate.getValueString();
                 new AlertDialog.Builder(this)
                         .setTitle(R.string.rate)
@@ -363,11 +392,11 @@ public class IoTSensorActivity extends AppCompatActivity
     @Override
     public void onClick(DialogInterface dialog, int which) {
         dialog.dismiss();
-        if(curFeatureIndex < 0)
+        if (curFeatureIndex < 0)
             return;
         DialogIoTSensor.SensorFeature feature = sensor.getFeature(curFeatureIndex);
         ArrayList<DialogIoTSensor.SensorValueRate> featureRates = feature.getRates();
-        if(featureRates != null) {
+        if (featureRates != null) {
             DialogIoTSensor.SensorValueRate rate = featureRates.get(which);
             Log.d("set feature rate", feature.name() + " - " + rate.getValueString());
             sensor.switchSensor(false);
@@ -378,7 +407,7 @@ public class IoTSensorActivity extends AppCompatActivity
 
     protected String getSensorFeatureValueString(DialogIoTSensor.SensorFeature feature) {
         String featureValueString = feature.getValueString();
-        if(feature == DialogIoTSensor.SensorFeature.MAGNETOMETER) {
+        if (feature == DialogIoTSensor.SensorFeature.MAGNETOMETER) {
             featureValueString += sensor.getMagnetoAngleString();
             featureValueString += sensor.getMagnetoDirectionString(getResources().getStringArray(R.array.directions));
         }
