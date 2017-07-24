@@ -31,6 +31,8 @@ import net.erabbit.ble.BleDevice;
 import net.erabbit.ble.BleDevicesManager;
 import net.erabbit.ble.BleSearchReceiver;
 
+import org.json.JSONObject;
+
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.TreeMap;
@@ -124,6 +126,13 @@ public class MainActivity extends AppCompatActivity
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
         bleDevicesManager = BleDevicesManager.getInstance(this);
+        JSONObject jo = BleDevice.loadJsonAsset(this, "DialogIoTSensorKit.json");
+        try {
+            bleDevicesManager.addSearchFilter(jo);
+        }
+        catch(Exception e) {
+            e.printStackTrace();
+        }
         deviceList = (ListView)findViewById(R.id.deviceList);
         deviceAdapter = new DeviceAdapter(this, R.layout.device_list_row, devices);
         deviceList.setAdapter(deviceAdapter);
