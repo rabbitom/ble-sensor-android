@@ -3,7 +3,7 @@
     "advertisement": {
         "name": "IoT-DK-SFL",
         "service": "2ea7",
-        "nameFilterPattern": ".+"
+        "nameFilterPattern": ".*[Ii][Oo][Tt].*"
     },
     "services": [
         {

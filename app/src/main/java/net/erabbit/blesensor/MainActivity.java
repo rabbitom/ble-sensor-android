@@ -77,6 +77,11 @@ public class MainActivity extends AppCompatActivity
         public void onSearchTimeOut() {
             progressDlg.dismiss();
         }
+
+        @Override
+        public void onSearchError(int errId, String error) {
+            new AlertDialog.Builder(MainActivity.this).setTitle("错误").setMessage(error).show();
+        }
     };
 
     protected class DeviceAdapter extends ArrayAdapter<BleDevice> {
