@@ -9,15 +9,13 @@ deploy:
   provider: releases
   api_key:
     secure: BsIeyFz05Z9N18IN30AEICqROA6pq+nkGxoRmwjcEYZHUYPuGdxElUz8ogo84c+gCMXBF2Ne7AnM3pe6SxdCaGqpcAnNHe05V3DdMzFtslA2TXqc2Z/L1RMoDtwubwmicGvKFVrxb/MkwoJVAGwzWK5Jz+TEFUx0BcJLME14TMJCGbecHLe+UvIoheBh7q62EpKaQHbsjlfy6+OU4wTVXGy+MT+TOgTCaV5NYWMwPK0Z9cj8KaviFYicWmfdaKOo63909U23AARAAFheGmEQGGyvX4qxQSW9zyScV0hU8Sp/wLWVtfqe2MAjvqlACAgSgBNYecaUCHhoSzX9CDRbgcmI41fUC413jmJP1xfzpRp5WMx8gsHkyXMduEhFVs9jEd1q7X5W03bXU+HEvE1QO1ga6tXO0fTiMvE8nO0Zm2bdf+UzjFVtZipYGDOIsQYIht1mznSzeJdp1bEBpl/yJ1I0IA7GgWNfJsT8r6qFZAYAw6OlJ2Q45nDrITG+ClLbUu7QvMqgkz4QLFCFsQcekXquqhoTJgwNIf6sl7w/DTie/eYslsLaLaJrEJBIBcZGkdXQOnSDHxVrNg6f48a0pz1jKv7CDIENI7rTSTXOfPuhA+dtn18oMArB2jkmwOijP8z7oJLhrFbT3ckjBF355gwd6PsmhSYTgJfVM6npMYE=
-  file: app/app-release.apk
+  file: app/build/outputs/apk/app-release.apk
   skip_cleanup: true
   on:
     repo: rabbitom/ble-sensor-android
     tags: true
 before_install:
-- openssl aes-256-cbc -K $encrypted_e01b280f5ed0_key -iv $encrypted_e01b280f5ed0_iv
-  -in android_common_release_key.jks.enc -out app/android_common_release_key.jks -d
+- openssl aes-256-cbc -K $encrypted_e01b280f5ed0_key -iv $encrypted_e01b280f5ed0_iv -in android_common_release_key.jks.enc -out app/android_common_release_key.jks -d
 - gem install fir-cli
 after_deploy:
-- fir p app/build/outputs/apk/app-release.apk -T $FIR_TOKEN -c "`git cat-file tag
-  $TRAVIS_TAG`"
+- fir p app/build/outputs/apk/app-release.apk -T $FIR_TOKEN -c "`git cat-file tag $TRAVIS_TAG`"
