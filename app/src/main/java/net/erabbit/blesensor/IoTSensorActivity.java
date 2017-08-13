@@ -141,6 +141,8 @@ public class IoTSensorActivity extends AppCompatActivity
 
     BleDevicesManager bleDevicesManager;
 
+    LocalBroadcastManager lbm;
+
     DeviceStateReceiver deviceStateReceiver = new DeviceStateReceiver() {
 
         @Override
@@ -239,7 +241,7 @@ public class IoTSensorActivity extends AppCompatActivity
         if (sensor == null)
             finish();
 
-        LocalBroadcastManager lbm = LocalBroadcastManager.getInstance(this);
+        lbm = LocalBroadcastManager.getInstance(this);
         deviceStateReceiver.registerReceiver(lbm);
 
         ActionBar actionBar = getSupportActionBar();
@@ -270,6 +272,12 @@ public class IoTSensorActivity extends AppCompatActivity
         featureFragment.hide();
         device3DFragment = (Device3DFragment) fragmentManager.findFragmentById(R.id.device3d);
         device3DFragment.hide();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        lbm.unregisterReceiver(deviceStateReceiver);
     }
 
     @Override
