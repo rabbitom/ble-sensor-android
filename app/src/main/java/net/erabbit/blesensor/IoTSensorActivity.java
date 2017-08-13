@@ -174,9 +174,11 @@ public class IoTSensorActivity extends AppCompatActivity
             TextView versionText = (TextView) findViewById(R.id.versionText);
             if (versionText != null)
                 versionText.setText(getString(R.string.firmware_version, ((DialogIoTSensor) sensor).getFirmwareVersion()));
+            //disable all sensors
+            for(DialogIoTSensor.SensorFeature feature : sensor.features)
+                sensor.switchSensorFeature(feature, false);
             featureAdapter.notifyDataSetChanged();
             sensor.readSettings();
-
         }
 
         @Override
