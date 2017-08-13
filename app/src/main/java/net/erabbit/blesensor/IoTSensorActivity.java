@@ -199,14 +199,6 @@ public class IoTSensorActivity extends AppCompatActivity
             super.onDeviceValueChanged(deviceID, key, value);
             int valueParam = (int) value;
             switch (key) {
-                case DialogIoTSensor.VALUE_OF_SENSOR_SWITCH: {
-                    allSensorSwitch.setChecked(valueParam > 0);
-                    if (curFeatureIndex >= 0) {
-                        DialogIoTSensor.SensorFeature feature = sensor.getFeature(curFeatureIndex);
-                        featureFragment.getFeatureSwitch().setChecked(feature.isEnabled() && sensor.isSensorOn());
-                    }
-                }
-                break;
                 case DialogIoTSensor.VALUE_OF_SENSOR_FEATURE: {
                     int position = valueParam;
                     DialogIoTSensor.SensorFeature sensorFeature = sensor.getFeature(position);
@@ -254,9 +246,6 @@ public class IoTSensorActivity extends AppCompatActivity
         featureAdapter = new FeatureAdapter();
         featureList.setAdapter(featureAdapter);
         featureList.setOnItemClickListener(featureAdapter);
-        allSensorSwitch = (Switch) findViewById(R.id.allSensorSwitch);
-        if (allSensorSwitch != null)
-            allSensorSwitch.setOnClickListener(this);
         setTitle(sensor.getDeviceName());
         if (!sensor.getConnected()) {
             progressDlg = ProgressDialog.show(this, getString(R.string.connecting_title), getString(R.string.connecting_msg), true, true, new DialogInterface.OnCancelListener() {
@@ -322,9 +311,7 @@ public class IoTSensorActivity extends AppCompatActivity
 
     @Override
     public void onClick(View v) {
-        if (v == allSensorSwitch) {
-            sensor.switchSensor(allSensorSwitch.isChecked());
-        } else if (v.getId() == R.id.featureSwitch) {
+        if (v.getId() == R.id.featureSwitch) {
             DialogIoTSensor.SensorFeature sensorFeature = (DialogIoTSensor.SensorFeature) v.getTag();
             sensor.switchSensorFeature(sensorFeature, ((Switch) v).isChecked());
             FeatureViewHolder vh = getFeatureViewHolder(sensor.features.indexOf(sensorFeature));
